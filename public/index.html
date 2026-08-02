@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>4K Video Downloard</title>
+<style>
+  :root {
+    --bg: #030712;
+    --dot-core: #b458b3;
+    --dot-edge: #b458b3;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  #particles {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ---------------------------------------------------------------
+     Demo content only — shows the canvas working as a background.
+     Delete this block and put your real UI here instead. Anything
+     with position:relative + z-index:1 will sit above the canvas.
+  --------------------------------------------------------------- */
+  .demo {
+    position: relative;
+    z-index: 1;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .demo h1 {
+    color: #f2e7ee;
+    font-size: 1.6rem;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: 0.3px;
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 18px;
+    border-radius: 999px;
+    border: 1px solid #2c2233;
+    background: rgba(255,255,255,0.03);
+    color: #e6dbe4;
+    font-size: 0.85rem;
+  }
+  .pill .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #3b82f6;
+  }
+</style>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="particles"></canvas>
+<div class="demo">
+ <div class="app">
+    <div>
+      <h1 class="title">4K Video Downloader</h1>
+    </div>
+    <div class="input-row">
+      <input type="text" id="urlInput" placeholder="https://example.com/video.mp4">
+      <button id="addBtn">download</button>
+    </div>
+    <p class="hint">Supports .mp4, .webm, .mov, .m4v — one link at a time or drop a text file below</p>
+
+    <div class="list" id="list">
+      <div class="empty" id="emptyState">Your downloads will appear here</div>
+    </div>
+  </div>
+  <script src="web.js"></script>
+</div>
+
+<script>
+(function () {
+  const canvas = document.getElementById('particles');
+  const ctx = canvas.getContext('2d');
+
+  // ---------- tweak these ----------
+  const DOT_CORE       = '#b458b3';  // brighter core color
+  const DOT_EDGE       = '#b458b3';  // deeper edge color (sampled from your image)
+  const DENSITY        = 11000;      // 1 particle per this many px^2 — lower = more particles
+  const MAX_PARTICLES  = 160;
+  const MIN_RADIUS     = 1.1;
+  const MAX_RADIUS     = 2.6;
+  const MIN_SPEED      = 12;         // px / second
+  const MAX_SPEED      = 42;
+  const ANGLE_SPREAD   = 32;         // degrees either side of straight up — this is the "random direction"
+  const TWINKLE        = true;
+  // ----------------------------------
+
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let width, height, particles;
+
+  function rand(min, max) { return Math.random() * (max - min) + min; }
+
+  function makeParticle(spawnAnywhere) {
+    const angleDeg = rand(-ANGLE_SPREAD, ANGLE_SPREAD);
+    const angle = (angleDeg - 90) * Math.PI / 180; // -90deg = straight up
+    const speed = rand(MIN_SPEED, MAX_SPEED);
+    const radius = rand(MIN_RADIUS, MAX_RADIUS);
+    return {
+      x: rand(0, width),
+      y: spawnAnywhere ? rand(0, height) : height + radius * 4,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      radius,
+      baseAlpha: rand(0.45, 1),
+      twinklePhase: rand(0, Math.PI * 2),
+      twinkleSpeed: rand(0.6, 1.6),
+      colorMix: Math.random()
+    };
+  }
+
+  function targetCount() {
+    return Math.min(MAX_PARTICLES, Math.max(24, Math.round((width * height) / DENSITY)));
+  }
+
+  function resize() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const count = targetCount();
+    if (!particles) {
+      particles = Array.from({ length: count }, () => makeParticle(true));
+    } else if (particles.length < count) {
+      while (particles.length < count) particles.push(makeParticle(true));
+    } else if (particles.length > count) {
+      particles.length = count;
+    }
+  }
+
+  function mixColor(a, b, t) {
+    const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+    const ar = (pa >> 16) & 255, ag = (pa >> 8) & 255, ab = pa & 255;
+    const br = (pb >> 16) & 255, bg = (pb >> 8) & 255, bb = pb & 255;
+    const r = Math.round(ar + (br - ar) * t);
+    const g = Math.round(ag + (bg - ag) * t);
+    const b2 = Math.round(ab + (bb - ab) * t);
+    return `rgb(${r}, ${g}, ${b2})`;
+  }
+
+  let lastTime = performance.now();
+
+  function step(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+
+    ctx.clearRect(0, 0, width, height);
+
+    for (const p of particles) {
+      if (!reduceMotion) {
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+      }
+
+      // once a particle drifts past the top or either side, respawn it at the bottom
+      if (p.y < -10 || p.x < -10 || p.x > width + 10) {
+        Object.assign(p, makeParticle(false));
+      }
+
+      let alpha = p.baseAlpha;
+      if (TWINKLE && !reduceMotion) {
+        p.twinklePhase += p.twinkleSpeed * dt;
+        alpha = p.baseAlpha * (0.7 + 0.3 * Math.sin(p.twinklePhase));
+      }
+
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+      ctx.fillStyle = mixColor(DOT_EDGE, DOT_CORE, p.colorMix);
+      ctx.globalAlpha = alpha;
+      ctx.shadowColor = DOT_CORE;
+      ctx.shadowBlur = p.radius * 4;
+      ctx.fill();
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+    requestAnimationFrame(step);
+  }
+
+  window.addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(step);
+})();
+</script>
+<script src="script.js"></script>
+<script src="web.js"></script>
+</body>
+</html>
